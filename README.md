@@ -1,5 +1,5 @@
 # multivariate_stats_MSc
-Repo for graduate mvt stats course.
+Repo for graduate multivariate statistics course.
 
 Exam 1 and Exam 2 Rmarkdown's includes my codes and analysis for topics as:
 
