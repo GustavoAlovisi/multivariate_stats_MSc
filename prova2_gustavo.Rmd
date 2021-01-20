@@ -1,0 +1,416 @@
+---
+title: "prova2_est_mvt"
+author: "Gustavo Alovisi"
+date: "17/01/2021"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, include=FALSE}
+library(tidyverse)
+library(MASS)
+library(caret)
+library(factoextra)
+library(mvtnorm)
+library(NbClust)
+```
+
+# Exercício 1: O arquivo "BD1" trás um banco de dados com medidas da mandíbula de 77 cães tailandeses de 5 raças distintas. As nove variáveis estão descritas no arquivo R "Arquivo prova2 2020":
+
+
+```{r cars}
+##################################################################################
+################################QUESTAO 1######################################
+#x1: Comprimento da mandíbula
+#x2: Largura da mandíbula abaixo do primeiro molar
+#x3: Largura do côndilo articular
+#x4: Altura da mandíbula abaixo do primeiro molar
+#x5: Comprimento do primeiro molar
+#x6: Largura do primeiro molar
+#x7: Comprimento do primeiro ao terceiro molar
+#x8: Comprimento do primeiro ao quarto premolar
+#x9: Largura do canino inferior
+
+
+dados_full <- read.table("BD1.txt", header=T,sep="")
+
+#dados <- dados[,-1]
+dados <- dados_full[,2:10]
+
+#Analise da matriz de covariancia:
+cov(dados)
+
+
+```
+## a) Realize a ACP (sem rotação) e apresente os 2 maiores autovalores, os autovetores associados e opercentual acumulado da variação explicada. Interprete a estrutura de correlação dos dados usandoos 2 "primeiros" autovetores:
+
+Vamos rodar um PCA com SCALE = TRUE (na matriz de correlação) dado as diferenças de escala entre as variáveis:
+
+```{r}
+pc<-prcomp(dados, scale.= TRUE)  
+```
+
+Dois maiores autovalores (variâncias):
+```{r}
+eigenvalues <- pc$sdev^2
+head(eigenvalues,2)
+```
+
+
+Vamos obter os autovetores associados a estes autovalores:
+
+```{r}
+pc$rotation[,c(1,2)]
+```
+
+O percentual da variância explicada pelos dois primeiros componentes é obtida através da função summary:
+
+```{r}
+summary(pc)
+```
+Podemos notar que a proporção cumulativa da variância é de 0.8658 para PC1 e PC2. 
+```{r}
+biplot(pc)
+```
+
+
+Através da análise dos dois primeiros componentes, podemos notar que o PC1 é a média ponderada das variáveis X1...X9. Porém, o PC2 faz uma distinção entre as variáveis de Largura e as variáveis de Comprimento. 
+
+
+## b) 'Ordene os cães baseados nos escores do primeiro CPs e apresente a raça dos 20 com asmaiores medidas. Esse ordenamento faz algum sentido? Justifique!
+
+Vamos ordenar os cães com base no Primeiro Componente, que é uma média ponderada das variáveis X1..X9. Os valores calculados do primeiro componente são obtidos através de pc$x[,1]:
+
+```{r}
+n <- nrow(dados_full)
+ss <- data.frame(ord=seq(1,n,by=1), y=pc$x[,1], raca = dados_full[,11])
+ss_ord = ss[order(ss[,2], decreasing=T),]
+head(ss_ord, 20)
+```
+
+Através do ordenamento utilizando o PC1, percebemos que a raça mais presente é a de Lobos Indianos (14/20 obs). Como o PC1 é uma média ponderada das variáveis X1...X9 e seus valores, esta raça tem uma predominância de observações com valores altos para as variáveis mencionadas em relação à outras raças. 
+
+Para checar se esta análise faz sentido, podemos comparar a média geral das observações para X1..X9 com a média dos Lobos Indianos:
+
+
+```{r}
+#média geral de X1..X9
+dados_full %>% summarize_at(vars(X1:X9), mean) %>% round(2)
+```
+
+```{r}
+#média dos Lobos Indianos para X1..X9:
+dados_full %>% filter(Raça == 'LobosIndianos') %>% summarize_at(vars(X1:X9), mean) %>% round(2)
+```
+
+De fato, podemos perceber que as médias de X1..X9 para Lobos Indianos são maiores que a média geral, corroborando nossa hipótese. 
+
+## c) Realize a AF com 2 fatores (utilizando extração das cargas via máxima verossimilhança e rotação varimax) e apresente as cargas fatoriais, as variâncias dos fatores, o percentual acumulado da variação explicada, as comunalidades e a variância não explicada de cada variável. Interprete a estrutura de correlação dos dados usando os 2 primeiros fatores.
+
+```{r}
+facAnalysis <- factanal(dados_full[2:10], factors = 2, rotation = "varimax", scores = "regression")
+facAnalysis
+```
+
+Acima, as cargas fatoriais do F1 e F2 são dadas pela lista Loadings. Proportional Var é a variância de cada fator (0.447, 0.378), com Variância Cumulativa dos Fatores de 0.824. A variância de cada variável não explicada pelos fatores é dada pela lista Uniquenesses. A comunalidade é simplesmente 1 - Uniquenesses: 
+
+```{r}
+Comunalidade <- 1 - facAnalysis$uniquenesses
+Comunalidade
+```
+
+Vamos agora plotar o biplot dos fatores 1 e 2 e realizarmos uma análise dos resultados. A rotação varimax busca criar fatores ortogonais não correlacionados entre si. 
+
+```{r}
+x = facAnalysis$scores[,1:2]
+	# Get the loadings on the first two factors
+y = facAnalysis$loadings[,1:2]
+biplot(x,y)
+```
+
+Analisando as cargas fatoriais e o plot podemos perceber que o Fator 1 fez uma maior distinção entre as variáveis de altura x comprimento do que o PCA. O Fator 2 se assemelha de certa forma ao PC2 do PCA, que também busca realizar uma distinção entre essas variáveis. 
+
+
+
+
+## Exercício 2. O banco “nacoes2” trás um banco de dados contendo variáveis sócio demográficasde 20 países em um determinado período.
+
+```{r}
+dadosFull <- read.table("nacoes2.txt", header=T,sep="")
+glimpse(dadosFull)
+```
+
+Vamos primeiro padronizar os dados para trabalhar com a clusterização: 
+
+```{r}
+dados <- scale(dadosFull[,2:9])
+round(head(dados),2)
+```
+
+
+# a) Proceda a uma Análise de Cluster dos países utilizando dois métodos hierárquicos (o complete linkage e o de Ward) e proponha um agrupamento. Descreva os clusters.
+
+(i) Complete Linkage: 
+
+Matriz de Distâncias:
+```{r}
+dist <- dist(dados, method = "euclidean")
+matriz_dist <- as.dist(dist, diag = T)
+```
+
+Gerando a árvore:
+```{r}
+Complete_CL <- hclust(matriz_dist, method = "complete")
+Complete_CL$height
+```
+
+```{r}
+cluster_an <- NbClust::NbClust(dados, distance = "euclidean", min.nc = 2, 
+                               max.nc = 8, method = "complete", 
+                               index =  "all", alphaBeale = 0.1)
+
+```
+Para tomar a decisão do número de clusters a serem utilizados, analisamos o Hubert Index e o D Index. O Hubert Index procura um ponto de grande variação na sua medida, assim como D Index. Para o método de Complete Linkage, o número de clusters sugeridos foi de k=2. Assim, vamos plotar a árvore final com 2 clusters: 
+
+```{r}
+plot(Complete_CL, labels=dadosFull$Country, main = "Complete Linkage", hang=-1)
+rect.hclust(Complete_CL, k=2, border = 2:4)
+```
+Podemos ver que o primeiro cluster (cluster 2) é constituido dos países Brazil, Nigéria, Saudi Arabia e South Africa. O restante dos países foi classificado como pertecendo ao segundo cluster. 
+
+Ainda, é possível comparar as médias das observações de cada cluster para ter uma noção do que está sendo diferenciado para cada grupo.
+
+Atribuindo os clusters estimados aos dados: 
+```{r}
+clusters <- cutree(Complete_CL, k=2) #vamos cortar em k = 2, nosso k escolhido. 
+dadosFull$clusters <- clusters
+```
+
+Calculando médias: 
+
+```{r}
+dadosFull %>% group_by(clusters) %>% summarize_at(vars(popu:babymort), mean)
+```
+
+Percebemos que o cluster 1 (demais países) apresenta uma média menor de população (popu), com maior densidade, população urbana, expectativa de vida e alfabetização (literacy). O cluster 2 (Brazil, Nigéria, Saudi Arabia e South Africa) apresenta níveis maiores de mortalidade infantil (babymort), crescimento populacional (pop.incr) em relação ao cluster 1. 
+
+(ii) Ward
+
+```{r}
+Ward_CL <- hclust(matriz_dist, method = "ward.D2")
+Ward_CL$height
+```
+
+```{r}
+cluster_an <- NbClust::NbClust(dados, distance = "euclidean", min.nc = 2, 
+                               max.nc = 8, method = "ward.D2", 
+                               index =  "all", alphaBeale = 0.1)
+```
+
+No caso do método de Ward, o número sugerido de clusters também foi 2. Vamos checar o plot da árvore:
+
+```{r}
+plot(Ward_CL, labels=dadosFull$Country, main = "Ward.D2", hang=-1)
+rect.hclust(Ward_CL, k=2, border = 5:6)
+```
+Pelo método de Ward, percebemos a mesma classificação dos países como a classificação do Complete Linkage. Assim, a mesma análise acima em relação aos clusters se aplica. 
+
+
+# b) Proceda uma Análise de Cluster dos países utilizando o método k-means [com centroidesiniciais aleatórios e semente set.seed(1)]. Defina um número k de grupos a priori e justifique aescolha de k. Descreva os clusters.
+
+
+Podemos determinar o k ótimo de diversas formas. Formas famosas na literatura incluem o 'elbow' que apresenta a maior decaída do WSS: Withing Sum of Squares do kmeans, e o valor que maximiza a largura média do Silhouete. 
+
+Abaixo, vamos rodar estas análises com a library factoextra. 
+
+
+```{r}
+factoextra::fviz_nbclust(dados, kmeans, method = "wss")
+factoextra::fviz_nbclust(dados, kmeans, method = "silhouette")
+
+```
+
+Em ambas as métricas, podemos ver que k = 2 parece ser o número ótimo de clusters do k-means: um decaimento rápido no WSS entre k=1 e k=2 e a maior largura da Silhouette para k=2. Ainda, k=2 foi o número ótimo de clusters encontrados para nossos clusters hierárquicos. 
+
+Assim, vamos rodar o k-means com k=2: 
+
+```{r}
+set.seed(1)
+km <- kmeans(dados, 2) 
+km$cluster
+km$centers
+km
+```
+
+Vamos analisar os clusters atribuídos a nossos dados:
+
+```{r}
+dadosFull1 <- cbind(dadosFull, km$cluster)
+glimpse(dadosFull1)
+```
+
+Podemos também plotar os clusters em plano 2d: 
+
+```{r}
+factoextra:: fviz_cluster(km, data = dados,
+           #  palette = c("#2E9FDF", "#00AFBB", "#E7B800"), 
+                           geom = "point",
+                           ellipse.type = "convex", 
+                           ggtheme = theme_bw())
+```
+No plot, é possível perceber que o algoritmo do k-means fez um bom trabalho de classificação com k = 2 grupos. 
+
+Da mesma forma, vamos rodar um PCA para visualizarmos: 
+
+```{r}
+pc<-prcomp(dados, scale.= T)
+z<-pc$x
+plot(z[,1],z[,2],pch=16,col=km$cluster,xlab="pc1", ylab="pc2",main="PCA do K-means")
+text(z,labels=dadosFull[,1])
+```
+Os clusters tanto do k-means quanto dos hierárquicos apresentaram a mesma classificação para os países: um cluster composto de Brazil, Saudi Arabia, Nigeria e South Africa e um cluster para os demais. 
+
+
+# Exercício 3
+
+Sejam $\boldsymbol{X_1} \sim N_3(\boldsymbol{\mu_1}, \Sigma)$ e $\boldsymbol{X_2}\sim N_3(\boldsymbol{\mu_2}, \Sigma)$ vetores aleatorios e considere $\boldsymbol{\mu_1^{'}} = [-3, 1, 4]$ e $\boldsymbol{\mu_2^{'}} = [-1,0,3]$. Seja ainda 
+\[\Sigma = \begin{bmatrix}
+1 & -2 & 0\\
+-2 & 5 & 0\\
+0 & 0 & 2
+\end{bmatrix}\]. 
+
+## a) Admitindo os custos de classificação errada c(2/1) = 100,00 e c(1/2) = 50,00 e probabilidades a priori p1 = 0.7 e p2 = 0.3, encontre e mostre os coeficientes do vetor discriminante e a constante discriminante:
+
+Informações do problema: 
+```{r}
+mu1 <- c(-3, 1, 4)
+mu2 <- c(-1, 0, 3)
+Sigma <- matrix(c(1,-2,0,-2,5,0,0,0,2), ncol=3)
+
+c2_1 <- 100
+c1_2 <- 50
+p1 <- 0.7
+p2 <- 0.3 
+```
+
+Os coeficientes do vetor discriminante (a) são dados por $\boldsymbol{a} = (\boldsymbol{\mu_1} - \boldsymbol{\mu_2})^{'}\Sigma^{-1}$:
+
+```{r}
+a_transpose <- t(mu1-mu2)%*%solve(Sigma)
+a_transpose
+```
+
+A Constante Discriminante 'm' é encontrada através de $m = \frac{1}{2}\boldsymbol{a}^{'}(\boldsymbol{\mu_1}+\boldsymbol{\mu_2})$:
+
+```{r}
+m = 0.5*(a_transpose%*%((mu1+mu2))) #constante discriminante 'm'
+m
+```
+
+
+Decide-se que a observação $\boldsymbol{x}_0$ pertence a população 1 se $y \ge m + \ln(\frac{c1|2}{c2|1}\frac{p2}{p1})$: 
+
+```{r}
+regra <- m + log((c1_2/c2_1)*(p2/p1))
+regra
+```
+
+
+## b) Considerando c(2|1) = c(1|2) e p1 = p2, calcule o TOE desta regra. Classifique uma nova observação $\boldsymbol{x}^{'} = [0, 1, 4]$:
+
+
+Se p1 = p2 e c2_1 = c1_2, a regra para classificar $\boldsymbol{x}$ no grupo 1 torna-se apenas $y \ge m = 16.25$.
+
+Demonstra-se que com essas hipóteses, $PTCI = TOE = \phi(-\Delta/2)$, pois o PTCI foi achado de maneira ótima.
+
+Assim, o TOE é dado por: 
+
+```{r}
+deltaSquared <- sqrt(a_transpose%*%(mu1-mu2))
+pnorm(-deltaSquared/2)
+```
+
+Seja a nova observação $x_{new} = [0,1,4]$. Achamos y através de $y = \boldsymbol{a^{'}x}$:
+
+```{r}
+x_new <- c(0,1,4)
+y = a_transpose %*% x_new
+y
+```
+
+Assim, como $y = -1 \le m = 16.25$, classificamos $\boldsymbol{x}_{new}$ como sendo da população 2. 
+
+## c) Usando a semente set.seed(1), simule uma amostra de tamanho 100 de cada uma das populações, ajuste a função de Ficher aos dados (usando função lda do R), obtenha a matriz de confusão e o TAE. Mostre os coeficientes do vetor discriminante: 
+
+Gerando dados: 
+
+```{r}
+Sigma <- matrix(c(1,-2,0,-2,5,0,0,0,2), ncol=3)
+#Sigma # covariancia
+mu_1 <- c(-3,1,4) ##vetor de medias da população 1
+mu_2 <- c(-1,0,3) ##vetor de medias da população 2
+
+###funcao para gerar dados normais multivariados (mvtnorm)
+
+### Simula Variaveis X - Normal Multivariada
+n <- 100
+set.seed(1)
+#Ex: Gerar uma normal 3 variada com media mu_1=c(-3,1,4) e covariancia Sigma 
+x_1 <- mvtnorm::rmvnorm(n, mean = mu_1, sigma = Sigma, method = "svd")
+x_2 <- mvtnorm::rmvnorm(n, mean = mu_2, sigma = Sigma, method = 'svd')
+
+f <- rep(c("g1","g2"), rep(100,2)) #######variavel fator de grupo
+
+##Continuar daqui pra frente
+
+
+dadosSim <- rbind(x_1, x_2)
+
+colnames(dadosSim) <- c("X1","X2","X3")
+
+dadosSim <- as.data.frame(dadosSim)
+dadosSim$f <- f
+head(dadosSim)
+```
+
+
+Rodando a LDA para os dados simulados, com prior = 0.3 e 0.7:
+
+```{r}
+
+dc <- MASS::lda(dadosSim$f ~., dadosSim[,c("X1","X2","X3")], prior = c(0.3,0.7))
+dc
+```
+
+
+Coeficientes do Vetor Discriminante:
+
+```{r}
+dc$scaling  ####coeficientes do vetor discriminante
+```
+
+
+Obtendo a TAE (Taxa Aparente de Erro)
+
+```{r}
+pred <- predict(dc)$class ##classificando as observacoes
+y <- predict(dc)$x ########gerando os escores discriminantes y-m
+
+tc <- table(dadosSim$f,pred) # Tabela de classificação
+TAE <- (tc[1,2]+tc[2,1])/nrow(dadosSim)  ########percentual empirico de erro classificacao
+TAE
+
+```
+
+
+Avaliando o ajuste: Matriz de Confusão.
+
+```{r}
+caret::confusionMatrix(as.factor(dadosSim$f), pred)
+```
+
+
